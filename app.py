@@ -196,7 +196,7 @@ def stat_dialog():
         sku_sales[r['sku']] = sku_sales.get(r['sku'], 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
         
     with t1:
-        st.caption("💡 표의 컬럼 이름(예: 수량, 강성)을 클릭하시면 오름차순/내림차순으로 자동 정렬됩니다.")
+        st.caption("💡 표의 컬럼 이름(예: 수량, 강성)을 클릭하시면 해당 기준으로 자동 정렬됩니다.")
         df1_data = []
         for k, v in sku_sales.items():
             info = st.session_state.inventory.get(k, {})
@@ -205,7 +205,8 @@ def stat_dialog():
                 "강성": info.get('flex', ''), "수량": v
             })
         df1 = pd.DataFrame(df1_data)
-        if not df1.empty: df1 = df1.sort_values("수량", ascending=False)
+        if not df1.empty: 
+            df1 = df1.sort_values(by="수량", ascending=False)
         st.dataframe(df1, use_container_width=True, hide_index=True)
         
     with t2:
@@ -218,7 +219,8 @@ def stat_dialog():
                     "강성": info.get('flex', ''), "현재수량": info['quantity'], "판매수량": sku_sales.get(sku, 0)
                 })
         df2 = pd.DataFrame(df2_data)
-        if not df2.empty: df2 = df2.sort_values("현재수량", ascending=True)
+        if not df2.empty: 
+            df2 = df2.sort_values(by="현재수량", ascending=True)
         st.dataframe(df2, use_container_width=True, hide_index=True)
         
     with t3:
@@ -227,7 +229,8 @@ def stat_dialog():
             b = r['brand'] if r['brand'] else "미분류"
             b_sales[b] = b_sales.get(b, 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
         df3 = pd.DataFrame(list(b_sales.items()), columns=["브랜드", "판매량"])
-        if not df3.empty: df3 = df3.sort_values("판매량", ascending=False)
+        if not df3.empty: 
+            df3 = df3.sort_values(by="판매량", ascending=False)
         st.dataframe(df3, use_container_width=True, hide_index=True)
         
     with t4:
@@ -246,7 +249,8 @@ def stat_dialog():
                 "품목": info.get('sub_category', ''), "강성": info.get('flex', ''), "수량": v
             })
         df4 = pd.DataFrame(df4_data)
-        if not df4.empty: df4 = df4.sort_values(["해당 월", "수량"], ascending=[False, False])
+        if not df4.empty: 
+            df4 = df4.sort_values(by=["해당 월", "수량"], ascending=[False, False])
         st.dataframe(df4, use_container_width=True, hide_index=True)
 
 # ================= 레이아웃 시작 =================
@@ -330,14 +334,20 @@ with right_pane:
     
     with tab_inv:
         s1, s2 = st.columns([1, 4])
-        s_type = s1.selectbox("검색 기준", ["SKU", "강성", "메모"], label_visibility="collapsed")
+        # 💡 수정된 부분: 모델명(품목)과 브랜드를 검색 옵션에 추가
+        s_type = s1.selectbox("검색 기준", ["SKU", "모델명(품목)", "브랜드", "강성", "메모"], label_visibility="collapsed")
         s_kw = s2.text_input("검색어", label_visibility="collapsed", placeholder="🔍 검색어 입력")
         
         df_inv = pd.DataFrame([{"SKU": k, "Brand": v.get('brand',''), "SubCat": v.get('sub_category',''), "Flex": v.get('flex',''), "Qty": v['quantity'], "Memo": v.get('memo','')} for k, v in st.session_state.inventory.items()])
         if not df_inv.empty:
             ntype, nbrand, nsub = st.session_state.selected_node
             if ntype == "SUB": df_inv = df_inv[(df_inv['Brand'] == nbrand) & (df_inv['SubCat'] == nsub)]
-            if s_kw: df_inv = df_inv[df_inv[s_type].str.contains(s_kw, case=False, na=False)]
+            
+            # 💡 수정된 부분: 선택된 검색어에 따라 매핑하여 정확히 필터링
+            if s_kw: 
+                search_map = {"SKU": "SKU", "모델명(품목)": "SubCat", "브랜드": "Brand", "강성": "Flex", "메모": "Memo"}
+                col_name = search_map[s_type]
+                df_inv = df_inv[df_inv[col_name].str.contains(s_kw, case=False, na=False)]
             
             st.caption("💡 표 안의 'Memo' 칸을 더블클릭하면 엑셀처럼 바로 글씨를 수정할 수 있습니다.")
             edited_df = st.data_editor(df_inv, use_container_width=True, hide_index=True, disabled=["SKU", "Brand", "SubCat", "Flex", "Qty"])
