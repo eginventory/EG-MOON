@@ -34,7 +34,7 @@ if 'status_msg' not in st.session_state:
 if 'selected_node' not in st.session_state: 
     st.session_state.selected_node = ("ALL", None, None)
 
-# 💡 '기본' 데이터 자동 청소 로직
+# '기본' 데이터 자동 청소 로직
 cleaned = False
 for b in list(st.session_state.categories.keys()):
     if "기본" in st.session_state.categories[b]:
@@ -46,6 +46,24 @@ for sku, info in st.session_state.inventory.items():
         cleaned = True
 if cleaned:
     save_all()
+
+# ================= 메인 UI 구성 시작 =================
+st.set_page_config(layout="wide", page_title="스마트 재고 관리 시스템 v8.0")
+
+# 디자인 커스텀 (CSS) - 폴더와 품목 사이의 간격을 확 줄여줍니다
+st.markdown("""
+<style>
+    [data-testid="stExpanderDetails"] {
+        gap: 0rem !important;
+        padding-top: 0rem !important;
+        padding-bottom: 0.5rem !important;
+    }
+    [data-testid="stExpanderDetails"] .stButton {
+        margin-top: -0.2rem !important;
+        margin-bottom: -0.2rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ================= 팝업창(Toplevel) 완벽 구현 =================
 @st.dialog("➕ 신규 상품 등록")
@@ -170,33 +188,68 @@ def manage_category_dialog():
 @st.dialog("📈 통계 및 분석 대시보드", width="large")
 def stat_dialog():
     t1, t2, t3, t4 = st.tabs(["🏆 많이 팔린 제품", "⚠️ 재고 부족", "🏢 브랜드별 판매량", "📅 월별 판매량"])
-    out_hist = [r for r in st.session_state.history if r['type'] == 'OUT']
     
+    # 출고 데이터 미리 집계 (공통 사용)
+    out_hist = [r for r in st.session_state.history if r['type'] == 'OUT']
+    sku_sales = {}
+    for r in out_hist: 
+        sku_sales[r['sku']] = sku_sales.get(r['sku'], 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
+        
     with t1:
-        sku_sales = {}
-        for r in out_hist: sku_sales[r['sku']] = sku_sales.get(r['sku'], 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
-        df1 = pd.DataFrame([{"SKU": k, "판매량": v, "브랜드": st.session_state.inventory.get(k, {}).get('brand', '')} for k, v in sorted(sku_sales.items(), key=lambda x: x[1], reverse=True)])
-        st.dataframe(df1, use_container_width=True)
+        st.caption("💡 표의 컬럼 이름(예: 수량, 강성)을 클릭하시면 오름차순/내림차순으로 자동 정렬됩니다.")
+        df1_data = []
+        for k, v in sku_sales.items():
+            info = st.session_state.inventory.get(k, {})
+            df1_data.append({
+                "SKU": k, "브랜드": info.get('brand', ''), "품목": info.get('sub_category', ''),
+                "강성": info.get('flex', ''), "수량": v
+            })
+        df1 = pd.DataFrame(df1_data)
+        if not df1.empty: df1 = df1.sort_values("수량", ascending=False)
+        st.dataframe(df1, use_container_width=True, hide_index=True)
+        
     with t2:
-        low = [{"SKU": s, "브랜드": i.get('brand',''), "품목": i.get('sub_category',''), "재고": i['quantity']} for s, i in st.session_state.inventory.items() if i['quantity'] <= 2]
-        st.dataframe(pd.DataFrame(low), use_container_width=True)
+        st.caption("💡 표의 컬럼 이름을 클릭하여 원하는 기준으로 정렬해보세요.")
+        df2_data = []
+        for sku, info in st.session_state.inventory.items():
+            if info['quantity'] <= 2:
+                df2_data.append({
+                    "SKU": sku, "브랜드": info.get('brand', ''), "품목": info.get('sub_category', ''),
+                    "강성": info.get('flex', ''), "현재수량": info['quantity'], "판매수량": sku_sales.get(sku, 0)
+                })
+        df2 = pd.DataFrame(df2_data)
+        if not df2.empty: df2 = df2.sort_values("현재수량", ascending=True)
+        st.dataframe(df2, use_container_width=True, hide_index=True)
+        
     with t3:
         b_sales = {}
         for r in out_hist: 
             b = r['brand'] if r['brand'] else "미분류"
             b_sales[b] = b_sales.get(b, 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
-        st.dataframe(pd.DataFrame(list(b_sales.items()), columns=["브랜드", "판매량"]).sort_values("판매량", ascending=False), use_container_width=True)
+        df3 = pd.DataFrame(list(b_sales.items()), columns=["브랜드", "판매량"])
+        if not df3.empty: df3 = df3.sort_values("판매량", ascending=False)
+        st.dataframe(df3, use_container_width=True, hide_index=True)
+        
     with t4:
-        m_sales = {}
+        st.caption("💡 해당 월이나 수량 컬럼을 클릭하여 정렬할 수 있습니다.")
+        month_sku_sales = {}
         for r in out_hist: 
             m = r['time'][:7]
-            m_sales[m] = m_sales.get(m, 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
-        st.dataframe(pd.DataFrame(list(m_sales.items()), columns=["월(YYYY-MM)", "판매량"]).sort_values("월(YYYY-MM)", ascending=False), use_container_width=True)
+            key = (m, r['sku'])
+            month_sku_sales[key] = month_sku_sales.get(key, 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
+        
+        df4_data = []
+        for (m, s), v in month_sku_sales.items():
+            info = st.session_state.inventory.get(s, {})
+            df4_data.append({
+                "해당 월": m, "SKU": s, "브랜드": info.get('brand', ''), 
+                "품목": info.get('sub_category', ''), "강성": info.get('flex', ''), "수량": v
+            })
+        df4 = pd.DataFrame(df4_data)
+        if not df4.empty: df4 = df4.sort_values(["해당 월", "수량"], ascending=[False, False])
+        st.dataframe(df4, use_container_width=True, hide_index=True)
 
-# ================= 메인 UI 구성 시작 =================
-st.set_page_config(layout="wide", page_title="스마트 재고 관리 시스템 v8.0")
-
-# 1. 상단 메뉴바
+# ================= 레이아웃 시작 =================
 menu1, menu2, menu3 = st.columns([2, 2, 6])
 with menu1:
     csv_data = pd.DataFrame.from_dict(st.session_state.inventory, orient='index').to_csv(encoding='utf-8-sig')
@@ -205,7 +258,6 @@ with menu2:
     if st.button("📈 통계 대시보드 열기", use_container_width=True): stat_dialog()
 st.divider()
 
-# 2. 좌/우 PanedWindow 분할
 left_pane, right_pane = st.columns([1, 4])
 
 # [좌측] 카테고리 트리 사이드바
@@ -216,8 +268,6 @@ with left_pane:
         is_expanded = (st.session_state.selected_node[1] == b)
         
         with st.expander(f"📁 {b}", expanded=is_expanded):
-            # 💡 중복되던 브랜드명 버튼 완전 삭제 완료
-            
             for s in subs:
                 s_type = "primary" if st.session_state.selected_node == ("SUB", b, s) else "secondary"
                 if st.button(f"└ 📄 {s}", key=f"btn_{b}_{s}", use_container_width=True, type=s_type):
@@ -228,7 +278,6 @@ with left_pane:
                     st.rerun()
                     
     st.markdown("---")
-    # 관리 버튼 패널
     btn1, btn2, btn3 = st.columns(3)
     if btn1.button("브랜드+", help="새로운 브랜드를 추가합니다"): add_brand_dialog()
     if btn2.button("품목+", help="선택한 브랜드에 품목을 추가합니다"): add_sub_dialog()
@@ -236,7 +285,6 @@ with left_pane:
 
 # [우측] 메인 영역
 with right_pane:
-    # 상단 컨트롤 프레임
     c1, c2, c3 = st.columns([2, 4, 2])
     mode = c1.radio("작업 모드:", ["입고 (+)", "출고 (-)"], horizontal=True)
     
@@ -247,7 +295,6 @@ with right_pane:
         
     if c3.button("➕ 신규 상품 등록", use_container_width=True): add_item_dialog()
 
-    # 바코드 스캔 로직 처리
     if submit_scan and barcode_input:
         code = barcode_input.strip()
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -268,7 +315,6 @@ with right_pane:
         else:
             add_item_dialog(pre_filled=code)
 
-    # 스캔 결과
     sc_res1, sc_res2 = st.columns([4, 1])
     sc_res1.info(st.session_state.status_msg)
     if sc_res2.button("↩️ 방금 스캔 취소", use_container_width=True):
@@ -280,7 +326,6 @@ with right_pane:
             st.session_state.status_msg = f"↩️ '{last['sku']}' 스캔 취소됨"
             st.rerun()
 
-    # Notebook 탭 영역
     tab_inv, tab_hist = st.tabs(["📦 재고 현황", "🕒 입출고 내역 (히스토리)"])
     
     with tab_inv:
@@ -291,7 +336,6 @@ with right_pane:
         df_inv = pd.DataFrame([{"SKU": k, "Brand": v.get('brand',''), "SubCat": v.get('sub_category',''), "Flex": v.get('flex',''), "Qty": v['quantity'], "Memo": v.get('memo','')} for k, v in st.session_state.inventory.items()])
         if not df_inv.empty:
             ntype, nbrand, nsub = st.session_state.selected_node
-            # ALL이 아닐 때만 필터링 적용
             if ntype == "SUB": df_inv = df_inv[(df_inv['Brand'] == nbrand) & (df_inv['SubCat'] == nsub)]
             if s_kw: df_inv = df_inv[df_inv[s_type].str.contains(s_kw, case=False, na=False)]
             
@@ -311,4 +355,15 @@ with right_pane:
         if not df_hist.empty:
             if h_date: df_hist = df_hist[df_hist['time'].str.startswith(str(h_date))]
             if h_type != "전체": df_hist = df_hist[df_hist['type'] == h_type]
+            
+            if not df_hist.empty:
+                df_hist = df_hist.rename(columns={
+                    "time": "날짜 및 시간", "type": "구분", "sku": "바코드 (SKU)",
+                    "brand": "브랜드", "sub_category": "품목", "flex": "강성",
+                    "change": "변동", "current_qty": "결과 재고"
+                })
+                df_hist = df_hist[["날짜 및 시간", "구분", "바코드 (SKU)", "브랜드", "품목", "강성", "변동", "결과 재고"]]
+                
             st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        else:
+            st.info("입출고 내역이 없습니다.")
