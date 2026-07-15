@@ -2,58 +2,78 @@ import streamlit as st
 import json
 import os
 import pandas as pd
-from datetime import datetime
 
-# 데이터 로드/저장 설정
+# 데이터 파일
 DATA_FILE = 'inventory_data.json'
-HISTORY_FILE = 'history_data.json'
+CAT_FILE = 'category_data.json'
 
-def load_json(file):
-    if os.path.exists(file):
-        with open(file, 'r', encoding='utf-8') as f: return json.load(f)
-    return {} if file == DATA_FILE else []
+def load_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+    return {}
 
-# 상태 초기화
-if 'inventory' not in st.session_state: st.session_state.inventory = load_json(DATA_FILE)
-if 'history' not in st.session_state: st.session_state.history = load_json(HISTORY_FILE)
+def load_cats():
+    if os.path.exists(CAT_FILE):
+        with open(CAT_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+    return {"미분류": ["기본"]}
 
-st.set_page_config(layout="wide")
-st.title("📦 스마트 재고 관리 시스템 v8.0")
+def save_all(data, cats):
+    with open(DATA_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
+    with open(CAT_FILE, 'w', encoding='utf-8') as f: json.dump(cats, f, ensure_ascii=False, indent=4)
 
-# 탭 구성
-tab1, tab2 = st.tabs(["📦 재고 현황", "🕒 입출고 내역"])
+if 'inventory' not in st.session_state: st.session_state.inventory = load_data()
+if 'cats' not in st.session_state: st.session_state.cats = load_cats()
 
-with tab1:
-    col_left, col_right = st.columns([1, 3])
-    with col_left:
-        st.subheader("분류 관리")
-        # 원래의 트리뷰 대신 선택형 리스트 사용
-        brands = list(set([item.get('brand', '미분류') for item in st.session_state.inventory.values()]))
-        sel_brand = st.selectbox("브랜드", ["전체"] + brands)
-    
-    with col_right:
-        st.subheader("재고 리스트")
-        df = pd.DataFrame.from_dict(st.session_state.inventory, orient='index')
-        if sel_brand != "전체": df = df[df['brand'] == sel_brand]
-        st.dataframe(df, use_container_width=True)
+st.title("📂 카테고리 관리 시스템")
 
-    st.subheader("스캔 및 등록")
-    mode = st.radio("작업 모드", ["입고", "출고"], horizontal=True)
-    barcode = st.text_input("바코드(SKU) 스캔")
-    
-    if st.button("확인(Enter)"):
-        if barcode in st.session_state.inventory:
-            change = 1 if mode == "입고" else -1
-            st.session_state.inventory[barcode]['quantity'] += change
-            # 히스토리 기록
-            st.session_state.history.append({"time": str(datetime.now()), "sku": barcode, "type": mode, "change": change})
-            with open(DATA_FILE, 'w', encoding='utf-8') as f: json.dump(st.session_state.inventory, f, ensure_ascii=False)
-            st.success(f"{barcode} {mode} 처리 완료!")
-            st.rerun()
-        else:
-            st.warning("미등록 바코드입니다. 등록 절차가 필요합니다.")
+# 1. 사이드바: 브랜드 및 품목 관리
+st.sidebar.subheader("브랜드/품목 설정")
+selected_brand = st.sidebar.selectbox("브랜드 선택", list(st.session_state.cats.keys()))
 
-with tab2:
-    st.subheader("입출고 내역")
-    hist_df = pd.DataFrame(st.session_state.history)
-    st.dataframe(hist_df, use_container_width=True)
+# 브랜드 이름 변경 및 삭제
+b_name = st.sidebar.text_input("브랜드 이름 변경", selected_brand)
+if st.sidebar.button("브랜드 수정"):
+    st.session_state.cats[b_name] = st.session_state.cats.pop(selected_brand)
+    save_all(st.session_state.inventory, st.session_state.cats)
+    st.rerun()
+
+if st.sidebar.button("브랜드 삭제"):
+    del st.session_state.cats[selected_brand]
+    save_all(st.session_state.inventory, st.session_state.cats)
+    st.rerun()
+
+# 2. 품목 관리
+st.sidebar.divider()
+sub_list = st.session_state.cats[selected_brand]
+selected_sub = st.sidebar.selectbox("품목 선택", sub_list)
+
+s_name = st.sidebar.text_input("품목 이름 변경", selected_sub)
+if st.sidebar.button("품목 수정"):
+    idx = sub_list.index(selected_sub)
+    sub_list[idx] = s_name
+    save_all(st.session_state.inventory, st.session_state.cats)
+    st.rerun()
+
+# 품목 순서 이동 (올리기/내리기)
+col1, col2 = st.sidebar.columns(2)
+if col1.button("▲ 올리기"):
+    idx = sub_list.index(selected_sub)
+    if idx > 0:
+        sub_list[idx], sub_list[idx-1] = sub_list[idx-1], sub_list[idx]
+        save_all(st.session_state.inventory, st.session_state.cats)
+        st.rerun()
+
+if col2.button("▼ 내리기"):
+    idx = sub_list.index(selected_sub)
+    if idx < len(sub_list)-1:
+        sub_list[idx], sub_list[idx+1] = sub_list[idx+1], sub_list[idx]
+        save_all(st.session_state.inventory, st.session_state.cats)
+        st.rerun()
+
+if st.sidebar.button("품목 삭제"):
+    sub_list.remove(selected_sub)
+    save_all(st.session_state.inventory, st.session_state.cats)
+    st.rerun()
+
+# 3. 데이터 표시
+st.dataframe(pd.DataFrame.from_dict(st.session_state.inventory, orient='index'))
