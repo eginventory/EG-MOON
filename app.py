@@ -34,7 +34,7 @@ if 'status_msg' not in st.session_state:
 if 'selected_node' not in st.session_state: 
     st.session_state.selected_node = ("ALL", None, None)
 
-# 💡 '기본' 데이터 자동 청소 로직 (기존에 만들어진 쓸데없는 '기본' 폴더와 데이터를 싹 지워줍니다)
+# 💡 '기본' 데이터 자동 청소 로직
 cleaned = False
 for b in list(st.session_state.categories.keys()):
     if "기본" in st.session_state.categories[b]:
@@ -152,7 +152,7 @@ def manage_category_dialog():
                     to_del = [s for s, i in st.session_state.inventory.items() if i.get('brand') == sel_b and i.get('sub_category') == sel_s]
                     for s in to_del: del st.session_state.inventory[s]
                     st.session_state.categories[sel_b].remove(sel_s)
-                    st.session_state.selected_node = ("BRAND", sel_b, None)
+                    st.session_state.selected_node = ("ALL", None, None)
                     save_all(); st.rerun()
                 
                 st.markdown("##### ↕️ 전시 순서 이동")
@@ -193,7 +193,6 @@ def stat_dialog():
             m_sales[m] = m_sales.get(m, 0) + abs(int(str(r['change']).replace('+','').replace('-','')))
         st.dataframe(pd.DataFrame(list(m_sales.items()), columns=["월(YYYY-MM)", "판매량"]).sort_values("월(YYYY-MM)", ascending=False), use_container_width=True)
 
-
 # ================= 메인 UI 구성 시작 =================
 st.set_page_config(layout="wide", page_title="스마트 재고 관리 시스템 v8.0")
 
@@ -213,23 +212,19 @@ left_pane, right_pane = st.columns([1, 4])
 with left_pane:
     st.markdown("### 📂 분류 폴더")
     
-    # 💡 수정된 부분: 상단의 '전체보기' 버튼 완전 제거
-    
     for b, subs in st.session_state.categories.items():
-        # 현재 선택된 브랜드의 폴더만 펼쳐지도록 설정
         is_expanded = (st.session_state.selected_node[1] == b)
         
         with st.expander(f"📁 {b}", expanded=is_expanded):
-            b_type = "primary" if st.session_state.selected_node == ("BRAND", b, None) else "secondary"
-            # 💡 수정된 부분: (전체보기) 글자를 지우고 그냥 폴더 아이콘과 브랜드명만 표시
-            if st.button(f"📂 {b}", key=f"btn_all_{b}", use_container_width=True, type=b_type):
-                st.session_state.selected_node = ("BRAND", b, None)
-                st.rerun()
+            # 💡 중복되던 브랜드명 버튼 완전 삭제 완료
             
             for s in subs:
                 s_type = "primary" if st.session_state.selected_node == ("SUB", b, s) else "secondary"
                 if st.button(f"└ 📄 {s}", key=f"btn_{b}_{s}", use_container_width=True, type=s_type):
-                    st.session_state.selected_node = ("SUB", b, s)
+                    if st.session_state.selected_node == ("SUB", b, s):
+                        st.session_state.selected_node = ("ALL", None, None)
+                    else:
+                        st.session_state.selected_node = ("SUB", b, s)
                     st.rerun()
                     
     st.markdown("---")
@@ -296,9 +291,8 @@ with right_pane:
         df_inv = pd.DataFrame([{"SKU": k, "Brand": v.get('brand',''), "SubCat": v.get('sub_category',''), "Flex": v.get('flex',''), "Qty": v['quantity'], "Memo": v.get('memo','')} for k, v in st.session_state.inventory.items()])
         if not df_inv.empty:
             ntype, nbrand, nsub = st.session_state.selected_node
-            # ALL이 아닐 때만 필터링 적용 (초기화면이나 검색 시 전체가 보임)
-            if ntype == "BRAND": df_inv = df_inv[df_inv['Brand'] == nbrand]
-            elif ntype == "SUB": df_inv = df_inv[(df_inv['Brand'] == nbrand) & (df_inv['SubCat'] == nsub)]
+            # ALL이 아닐 때만 필터링 적용
+            if ntype == "SUB": df_inv = df_inv[(df_inv['Brand'] == nbrand) & (df_inv['SubCat'] == nsub)]
             if s_kw: df_inv = df_inv[df_inv[s_type].str.contains(s_kw, case=False, na=False)]
             
             st.caption("💡 표 안의 'Memo' 칸을 더블클릭하면 엑셀처럼 바로 글씨를 수정할 수 있습니다.")
