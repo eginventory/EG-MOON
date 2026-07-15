@@ -22,22 +22,39 @@ def save_all():
     with open(CAT_FILE, 'w', encoding='utf-8') as f: json.dump(st.session_state.categories, f, ensure_ascii=False, indent=4)
     with open(HISTORY_FILE, 'w', encoding='utf-8') as f: json.dump(st.session_state.history, f, ensure_ascii=False, indent=4)
 
-if 'inventory' not in st.session_state: st.session_state.inventory = load_json(DATA_FILE, {})
-# 초기 카테고리 로드
+# 초기 세션 상태 로드
+if 'inventory' not in st.session_state: 
+    st.session_state.inventory = load_json(DATA_FILE, {})
 if 'categories' not in st.session_state: 
-    cats = load_json(CAT_FILE, {"미분류": []})
-    st.session_state.categories = cats
-if 'history' not in st.session_state: st.session_state.history = load_json(HISTORY_FILE, [])
-if 'status_msg' not in st.session_state: st.session_state.status_msg = "대기 중..."
-if 'selected_node' not in st.session_state: st.session_state.selected_node = ("ALL", None, None)
+    st.session_state.categories = load_json(CAT_FILE, {})
+if 'history' not in st.session_state: 
+    st.session_state.history = load_json(HISTORY_FILE, [])
+if 'status_msg' not in st.session_state: 
+    st.session_state.status_msg = "대기 중..."
+if 'selected_node' not in st.session_state: 
+    st.session_state.selected_node = ("ALL", None, None)
+
+# 💡 '기본' 데이터 자동 청소 로직 (기존에 만들어진 쓸데없는 '기본' 폴더와 데이터를 싹 지워줍니다)
+cleaned = False
+for b in list(st.session_state.categories.keys()):
+    if "기본" in st.session_state.categories[b]:
+        st.session_state.categories[b].remove("기본")
+        cleaned = True
+for sku, info in st.session_state.inventory.items():
+    if info.get('sub_category') == '기본':
+        info['sub_category'] = ''
+        cleaned = True
+if cleaned:
+    save_all()
 
 # ================= 팝업창(Toplevel) 완벽 구현 =================
 @st.dialog("➕ 신규 상품 등록")
 def add_item_dialog(pre_filled=""):
     st.warning("등록되지 않은 바코드입니다. 새로 등록하시겠습니까?" if pre_filled else "새로운 상품을 등록합니다.")
-    brand = st.selectbox("1. 브랜드명", list(st.session_state.categories.keys()))
     
-    # 해당 브랜드의 품목 리스트 가져오기 (없으면 안내 문구 표시)
+    brand_opts = list(st.session_state.categories.keys())
+    brand = st.selectbox("1. 브랜드명", brand_opts if brand_opts else ["(등록된 브랜드 없음)"])
+    
     sub_list = st.session_state.categories.get(brand, [])
     sub = st.selectbox("2. 품목(카테고리)", sub_list if sub_list else ["(등록된 품목 없음)"])
     
@@ -50,8 +67,8 @@ def add_item_dialog(pre_filled=""):
         elif sku.strip() in st.session_state.inventory: st.error("이미 등록된 바코드입니다.")
         else:
             st.session_state.inventory[sku.strip()] = {
-                "brand": brand, 
-                "sub_category": sub if sub != "(등록된 품목 없음)" else "미분류", 
+                "brand": brand if brand != "(등록된 브랜드 없음)" else "", 
+                "sub_category": sub if sub != "(등록된 품목 없음)" else "", 
                 "flex": flex.strip(), 
                 "location": loc.strip(), 
                 "quantity": 0, "memo": ""
@@ -65,7 +82,6 @@ def add_brand_dialog():
     nb = st.text_input("새로운 브랜드명 입력")
     if st.button("추가 완료", use_container_width=True) and nb:
         if nb not in st.session_state.categories:
-            # 💡 수정된 부분: 하위 폴더 자동생성 없이 딱 브랜드 빈 폴더만 생성합니다.
             st.session_state.categories[nb] = [] 
             save_all()
             st.rerun()
@@ -74,22 +90,28 @@ def add_brand_dialog():
 
 @st.dialog("📄 새 품목 추가")
 def add_sub_dialog():
+    if not st.session_state.categories:
+        st.warning("먼저 브랜드를 추가해주세요!")
+        return
+        
     tb = st.selectbox("어느 브랜드에 추가할까요?", list(st.session_state.categories.keys()))
     ns = st.text_input("새로운 품목명 입력")
     if st.button("추가 완료", use_container_width=True) and ns:
         if ns not in st.session_state.categories[tb]:
             st.session_state.categories[tb].append(ns)
-            # 품목이 추가되면 해당 브랜드를 열어주기 위한 세팅
             st.session_state.selected_node = ("BRAND", tb, None)
             save_all()
             st.rerun()
         else:
             st.error("이미 존재하는 품목입니다.")
 
-# 💡 수정된 부분: 두 번째 사진의 어드민 패널처럼 분리된 깔끔한 관리창
 @st.dialog("⚙️ 카테고리 관리 및 순서 설정", width="large")
 def manage_category_dialog():
     st.markdown("### 전시 방식 및 상세 카테고리 관리")
+    if not st.session_state.categories:
+        st.info("등록된 브랜드가 없습니다.")
+        return
+        
     col1, col2 = st.columns(2)
     
     with col1:
@@ -191,18 +213,16 @@ left_pane, right_pane = st.columns([1, 4])
 with left_pane:
     st.markdown("### 📂 분류 폴더")
     
-    # 💡 수정된 부분: 라디오 버튼 대신 버튼형 폴더 트리로 시각화 대폭 개선
-    if st.button("🌟 전체보기", use_container_width=True, type="primary" if st.session_state.selected_node[0] == "ALL" else "secondary"):
-        st.session_state.selected_node = ("ALL", None, None)
-        st.rerun()
-        
+    # 💡 수정된 부분: 상단의 '전체보기' 버튼 완전 제거
+    
     for b, subs in st.session_state.categories.items():
         # 현재 선택된 브랜드의 폴더만 펼쳐지도록 설정
         is_expanded = (st.session_state.selected_node[1] == b)
         
         with st.expander(f"📁 {b}", expanded=is_expanded):
             b_type = "primary" if st.session_state.selected_node == ("BRAND", b, None) else "secondary"
-            if st.button(f"📂 {b} (전체보기)", key=f"btn_all_{b}", use_container_width=True, type=b_type):
+            # 💡 수정된 부분: (전체보기) 글자를 지우고 그냥 폴더 아이콘과 브랜드명만 표시
+            if st.button(f"📂 {b}", key=f"btn_all_{b}", use_container_width=True, type=b_type):
                 st.session_state.selected_node = ("BRAND", b, None)
                 st.rerun()
             
@@ -276,6 +296,7 @@ with right_pane:
         df_inv = pd.DataFrame([{"SKU": k, "Brand": v.get('brand',''), "SubCat": v.get('sub_category',''), "Flex": v.get('flex',''), "Qty": v['quantity'], "Memo": v.get('memo','')} for k, v in st.session_state.inventory.items()])
         if not df_inv.empty:
             ntype, nbrand, nsub = st.session_state.selected_node
+            # ALL이 아닐 때만 필터링 적용 (초기화면이나 검색 시 전체가 보임)
             if ntype == "BRAND": df_inv = df_inv[df_inv['Brand'] == nbrand]
             elif ntype == "SUB": df_inv = df_inv[(df_inv['Brand'] == nbrand) & (df_inv['SubCat'] == nsub)]
             if s_kw: df_inv = df_inv[df_inv[s_type].str.contains(s_kw, case=False, na=False)]
